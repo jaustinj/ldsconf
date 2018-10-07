@@ -1,0 +1,6 @@
+venv
+notebooks
+.ipynb_checkpoints/
+.DS_Store
+temp
+output
