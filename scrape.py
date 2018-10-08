@@ -3,6 +3,7 @@ import functools
 import logging
 from itertools import product
 import os
+import pickle
 from time import sleep
 
 from bs4 import BeautifulSoup
@@ -32,50 +33,26 @@ def set_logging(directory, filename, level=logging.DEBUG):
     return logger
 
 logger = set_logging('./temp', 'ldscrawler.log')
-
-
-def create_file_if_not_exists(directory, filename=None):
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-        
-    if filename:
-        path = directory + '/' + filename
-        if not os.path.isfile(path):
-            with open(path, 'w') as file:
-                pass
-        return path
-        
-def save_to_file(directory, filename, df):
-    path = create_file_if_not_exists(directory, filename)
-    df.to_csv(path)
-    
-def pickle_save(obj, filename):
-    with open('./temp/pickles/{}.pickle'.format(filename), 'wb') as handle:
-        pickle.dump(obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        
-def pickle_load(directory, filename):
-    with open('./temp/pickles/{}.pickle'.format(filename), 'rb') as handle:
-        return pickle.load(handle)
-    
-def pickle_wipe():
-    files = os.listdir('./temp/pickles')
-    for file in files:
-        os.remove('./temp/pickles/' + file)
-    
-    os.rmdir('./temp/pickles')
     
 
 def exceptor(calling_level=logger.debug,
              success_level=logger.debug, 
              fail_level=logger.error,
+             no_arg=False,
              sep=False):
     def real_decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             if sep:
                 calling_level(sep)
-            arg_str = ', '.join([str(arg) for arg in args])
-            kwarg_str = ', '.join(['{}={}'.format(kwd, arg) for kwd, arg in kwargs.items()])
+
+            if no_arg:
+                arg_str = 'Too Large'
+                kwarg_str = ''
+            else:
+                arg_str = ', '.join([str(arg) for arg in args])
+                kwarg_str = ', '.join(['{}={}'.format(kwd, arg) for kwd, arg in kwargs.items()])
+            
             calling_level('Calling {}({}, {})'.format(func.__name__, arg_str, kwarg_str))
 
             try:
@@ -89,6 +66,42 @@ def exceptor(calling_level=logger.debug,
         return wrapper
     return real_decorator
        
+
+@exceptor()
+def create_file_if_not_exists(directory, filename=None):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        
+    if filename:
+        path = directory + '/' + filename
+        if not os.path.isfile(path):
+            with open(path, 'w') as file:
+                pass
+        return path
+     
+@exceptor(no_arg=True)   
+def save_to_file(directory, filename, df):
+    path = create_file_if_not_exists(directory, filename)
+    df.to_csv(path)
+  
+    
+@exceptor(no_arg=True)
+def pickle_save(obj, filename):
+    with open('./temp/pickles/{}.pickle'.format(filename), 'wb') as handle:
+        pickle.dump(obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+   
+@exceptor()     
+def pickle_load(directory, filename):
+    with open('./temp/pickles/{}.pickle'.format(filename), 'rb') as handle:
+        return pickle.load(handle)
+    
+@exceptor()
+def pickle_wipe():
+    files = os.listdir('./temp/pickles')
+    for file in files:
+        os.remove('./temp/pickles/' + file)
+    
+    os.rmdir('./temp/pickles')
 
             
 class LdsConfScraper(object):
@@ -115,7 +128,7 @@ class LdsConfScraper(object):
             sleep(delay)
             
     def to_df(self):
-        talks_nested = [talk for talk in [conf.talks for conf in Conf.conferences]]
+        talks_nested = [talk for talk in [conf.talks for conf in self.conferences]]
         talks = [item for sublist in talks_nested for item in sublist]
         talk_dicts = [talk.to_dict() for talk in talks]
         return pd.DataFrame.from_records(talk_dicts)
@@ -145,7 +158,7 @@ class ConferencePage(object):
     
     @exceptor()
     def _get_conference_page_soup(self):
-        return BeautifulSoup(requests.get(self.url, headers=self.HEADERS).content)
+        return BeautifulSoup(requests.get(self.url, headers=self.HEADERS).content, features='html.parser')
         
     @exceptor()
     def _get_talk_url_endings(self):
@@ -163,7 +176,7 @@ class ConferencePage(object):
         talks = []
         for url in self.talk_urls:
             talk = self._get_talk(url)
-            pickle_save(talk, talk.title.replace(' ', '_'))
+            pickle_save(talk.to_dict(), talk.title.replace(' ', '_').replace(',',''))
             talks.append(talk)
             sleep(self.delay)
             
@@ -204,7 +217,7 @@ class Talk(object):
     @exceptor()
     def _get_soup(self):
         content = requests.get(self.talk_url, headers=self.HEADERS).content
-        return BeautifulSoup(content)
+        return BeautifulSoup(content, features='html.parser')
     
     @exceptor()
     def _get_title(self):
@@ -258,7 +271,7 @@ class Talk(object):
 
 
 if __name__ == '__main__':
-    LdsConferences = LdsConfScraper(months=['04', '10'], years=range(1971, 2018), delay=3)
+    LdsConferences = LdsConfScraper(months=['04', '10'], years=range(1971, 2018), delay=1.5)
     conference_df = LdsConferences.to_df()
     output_folder = './output'
     output_filename = 'lds_conferences.csv'
